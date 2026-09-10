@@ -1,0 +1,24 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Per-module build outputs
+**/build/
+
+# Android Studio generated files
+*.hprof
+.navigation/
+
+# Keystore files
+*.jks
+*.keystore
+
+# Google Services (if ever added)
+google-services.json
