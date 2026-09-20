@@ -22,3 +22,4 @@ local.properties
 
 # Google Services (if ever added)
 google-services.json
+.kotlin/

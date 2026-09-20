@@ -128,10 +128,25 @@ Open the project in Android Studio and run the `sample` configuration, or from t
 
 > This repo doesn't ship the Gradle wrapper jar. Run `gradle wrapper` once after cloning (or just open the project in Android Studio, which offers to generate it for you).
 
+## Running the tests
+
+```bash
+./gradlew :starflow:testDebugUnitTest
+```
+
+The library's tests run on the JVM — no emulator needed:
+
+| Test class | What it covers | Runs on |
+|---|---|---|
+| `ModelsTest` | Defaults, equality and `copy` of `IconData`, `ArrowData`, `StarShapeData` | plain JUnit |
+| `PlacementMathTest` | Icon/arrow placement around the shape, rotation, label text | plain JUnit |
+| `BitmapConversionTest` | PNG/JPEG encoding, decode round trip, `getScaledIcon` density scaling | Robolectric |
+| `StarFlowGraphTest` | Composable size, and pixels actually drawn for circle/star, arrows and edge cases | Robolectric + Compose UI test |
+
 ## Requirements
 
 - `minSdk` 24+
-- JDK 17+ to run Gradle itself (the wrapper is pinned to Gradle 9.1.0 / AGP 8.13.0, which support JDK up to 25)
+- JDK 17+ to run Gradle itself (the wrapper is pinned to Gradle 9.6.1 / AGP 9.4.0)
 - Jetpack Compose (BOM `2026.03.01` or newer recommended)
 
 If Android Studio complains that its selected **Gradle JDK** is incompatible, that's a Studio setting, not a project file — go to *Settings → Build, Execution, Deployment → Build Tools → Gradle → Gradle JDK* and pick any bundled JDK 17–25.

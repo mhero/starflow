@@ -49,6 +49,10 @@ import kotlin.math.sin
 
 internal data class IconAndArrowPositionalData(val iconPosition: Offset, val arrowPosition: Offset)
 
+/** Label drawn under an icon: "primary • secondary", or just "primary" when there is no secondary text. */
+internal fun IconData.labelText(): String =
+    if (secondaryText.isNotEmpty()) "$primaryText • $secondaryText" else primaryText
+
 /** Shape drawn behind the icons and used to anchor the flow arrows. */
 public enum class BackgroundShape {
     Circle, Star
@@ -85,12 +89,31 @@ public fun StarFlowGraph(
     val offsetDistance = with(density) { 8.dp.toPx() }
 
     val outerRadius = sizePx / 2.5f
-    val innerRadius = outerRadius * 0.5f
-    val circleRadius = outerRadius * 0.65f
-
     val verticesCount = icons.size
 
-    val backgroundShape = when (backgroundShapeType) {
+    val backgroundShape = backgroundShapeFor(backgroundShapeType, verticesCount, outerRadius)
+    val primaryStarShape = remember(sizePx, backgroundShapeType, verticesCount) { backgroundShape }
+
+    Canvas(modifier = modifier.size(sizeDp)) {
+        drawStarFlow(
+            starShape = starShape,
+            icons = icons,
+            arrows = arrows,
+            backgroundShapeType = backgroundShapeType,
+            primaryStarShape = primaryStarShape,
+            outerRadius = outerRadius,
+            offsetDistance = offsetDistance,
+            typefaceText = typefaceText,
+            iconTextColor = iconTextColor,
+        )
+    }
+}
+
+/** Builds the polygon drawn behind the icons for a graph whose outer radius is [outerRadius] px. */
+internal fun backgroundShapeFor(type: BackgroundShape, verticesCount: Int, outerRadius: Float): RoundedPolygon {
+    val innerRadius = outerRadius * 0.5f
+    val circleRadius = outerRadius * 0.65f
+    return when (type) {
         BackgroundShape.Circle -> RoundedPolygon.circle(radius = circleRadius)
         BackgroundShape.Star -> RoundedPolygon.star(
             numVerticesPerRadius = verticesCount,
@@ -100,98 +123,102 @@ public fun StarFlowGraph(
             innerRounding = CornerRounding(innerRadius * 0.5f)
         )
     }
-    val primaryStarShape = remember(sizePx, backgroundShapeType, verticesCount) { backgroundShape }
+}
 
-    Canvas(modifier = modifier.size(sizeDp)) {
+/** Draws the whole graph into this scope; split out of the composable so it can be rendered off-screen in tests. */
+internal fun DrawScope.drawStarFlow(
+    starShape: StarShapeData,
+    icons: List<IconData>,
+    arrows: List<ArrowData>,
+    backgroundShapeType: BackgroundShape,
+    primaryStarShape: RoundedPolygon,
+    outerRadius: Float,
+    offsetDistance: Float,
+    typefaceText: Typeface = Typeface.DEFAULT,
+    iconTextColor: Int = Color.DarkGray.toArgb(),
+) {
+    val verticesCount = icons.size
+    val centerX = size.width / 2
+    val centerY = size.height / 2
+    val center = Offset(centerX, centerY)
 
-        val centerX = size.width / 2
-        val centerY = size.height / 2
-        val center = Offset(centerX, centerY)
+    val originalIconAndArrowPoints = generatePointsForIconAndArrowPlacement(
+        numVerticesPerRadius = verticesCount,
+        outerRadius = outerRadius,
+        centerX = centerX,
+        centerY = centerY,
+        offsetDistance = offsetDistance
+    )
 
-        val originalIconAndArrowPoints = generatePointsForIconAndArrowPlacement(
-            numVerticesPerRadius = verticesCount,
-            outerRadius = outerRadius,
-            centerX = centerX,
-            centerY = centerY,
-            offsetDistance = offsetDistance
+    val requiredRotation = -90f
+
+    val path = primaryStarShape.toPath().asComposePath()
+    val bounds = path.getBounds()
+    val offsetX = centerX - bounds.center.x
+    val offsetY = centerY - bounds.center.y
+
+    withTransform({
+        translate(offsetX, offsetY)
+        if (backgroundShapeType == BackgroundShape.Star) {
+            rotate(degrees = requiredRotation, pivot = bounds.center)
+        }
+    }) {
+        drawPath(
+            path = path,
+            color = Color(starShape.primaryColor),
+            style = Fill
         )
+    }
 
-        val requiredRotation = -90f
+    val rotatedIconAndArrowPoints = originalIconAndArrowPoints.map { iconVertex ->
+        iconVertex.copy(
+            iconPosition = rotatePoint(iconVertex.iconPosition, centerX, centerY, requiredRotation),
+            arrowPosition = rotatePoint(iconVertex.arrowPosition, centerX, centerY, requiredRotation)
+        )
+    }
 
-        val path = primaryStarShape.toPath().asComposePath()
-        val bounds = path.getBounds()
-        val offsetX = centerX - bounds.center.x
-        val offsetY = centerY - bounds.center.y
+    val scaledTextSize = outerRadius * 0.115f
+    val scaledTextOffset = outerRadius * 0.15f
 
-        withTransform({
-            translate(offsetX, offsetY)
-            if (backgroundShapeType == BackgroundShape.Star) {
-                rotate(degrees = requiredRotation, pivot = bounds.center)
-            }
-        }) {
-            drawPath(
-                path = path,
-                color = Color(starShape.primaryColor),
-                style = Fill
+    icons.zip(rotatedIconAndArrowPoints).forEach { (iconData, vertex) ->
+
+        val imageBitmap = byteArrayToImageBitmap(iconData.icon)
+        val iconWidth = imageBitmap.width.toFloat()
+        val iconHeight = imageBitmap.height.toFloat()
+
+        drawIntoCanvas { canvas ->
+            canvas.drawImage(
+                image = imageBitmap,
+                topLeftOffset = vertex.iconPosition - Offset(iconWidth / 2, iconHeight / 2),
+                paint = Paint()
             )
         }
 
-        val rotatedIconAndArrowPoints = originalIconAndArrowPoints.map { iconVertex ->
-            iconVertex.copy(
-                iconPosition = rotatePoint(iconVertex.iconPosition, centerX, centerY, requiredRotation),
-                arrowPosition = rotatePoint(iconVertex.arrowPosition, centerX, centerY, requiredRotation)
+        drawContext.canvas.nativeCanvas.drawText(
+            iconData.labelText(),
+            vertex.iconPosition.x,
+            vertex.iconPosition.y + iconHeight / 2 + scaledTextOffset,
+            android.graphics.Paint().apply {
+                color = iconTextColor
+                textSize = scaledTextSize
+                textAlign = android.graphics.Paint.Align.CENTER
+                typeface = Typeface.create(typefaceText, Typeface.BOLD)
+            }
+        )
+    }
+
+    arrows.forEach { arrow ->
+        val start = rotatedIconAndArrowPoints.getOrNull(arrow.fromTo.first)
+        val end = rotatedIconAndArrowPoints.getOrNull(arrow.fromTo.second)
+
+        if (start != null && end != null) {
+            drawCurvedArrow(
+                start.arrowPosition,
+                end.arrowPosition,
+                arrow.thickness,
+                center,
+                listOf(Color(arrow.colorPair.first), Color(arrow.colorPair.second))
             )
-        }
-
-        val scaledTextSize = outerRadius * 0.115f
-        val scaledTextOffset = outerRadius * 0.15f
-
-        icons.zip(rotatedIconAndArrowPoints).forEach { (iconData, vertex) ->
-
-            val imageBitmap = byteArrayToImageBitmap(iconData.icon)
-            val iconWidth = imageBitmap.width.toFloat()
-            val iconHeight = imageBitmap.height.toFloat()
-
-            drawIntoCanvas { canvas ->
-                canvas.drawImage(
-                    image = imageBitmap,
-                    topLeftOffset = vertex.iconPosition - Offset(iconWidth / 2, iconHeight / 2),
-                    paint = Paint()
-                )
-            }
-
-            val combinedText = if (iconData.secondaryText.isNotEmpty()) {
-                "${iconData.primaryText} • ${iconData.secondaryText}"
-            } else {
-                iconData.primaryText
-            }
-
-            drawContext.canvas.nativeCanvas.drawText(
-                combinedText,
-                vertex.iconPosition.x,
-                vertex.iconPosition.y + iconHeight / 2 + scaledTextOffset,
-                android.graphics.Paint().apply {
-                    color = iconTextColor
-                    textSize = scaledTextSize
-                    textAlign = android.graphics.Paint.Align.CENTER
-                    typeface = Typeface.create(typefaceText, Typeface.BOLD)
-                }
-            )
-        }
-
-        arrows.forEach { arrow ->
-            val start = rotatedIconAndArrowPoints.getOrNull(arrow.fromTo.first)
-            val end = rotatedIconAndArrowPoints.getOrNull(arrow.fromTo.second)
-
-            if (start != null && end != null) {
-                drawCurvedArrow(
-                    start.arrowPosition,
-                    end.arrowPosition,
-                    arrow.thickness,
-                    center,
-                    listOf(Color(arrow.colorPair.first), Color(arrow.colorPair.second))
-                )
-            }
         }
     }
 }
@@ -272,7 +299,7 @@ private fun DrawScope.drawClosedArrowhead(
     )
 }
 
-private fun generatePointsForIconAndArrowPlacement(
+internal fun generatePointsForIconAndArrowPlacement(
     numVerticesPerRadius: Int,
     outerRadius: Float,
     centerX: Float,
@@ -298,7 +325,7 @@ private fun generatePointsForIconAndArrowPlacement(
     return placements
 }
 
-private fun rotatePoint(point: Offset, centerX: Float, centerY: Float, angle: Float = -90f): Offset {
+internal fun rotatePoint(point: Offset, centerX: Float, centerY: Float, angle: Float = -90f): Offset {
     val radians = Math.toRadians(angle.toDouble())
     val cosTheta = cos(radians).toFloat()
     val sinTheta = sin(radians).toFloat()

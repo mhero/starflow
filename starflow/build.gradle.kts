@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
     `maven-publish`
 }
@@ -33,8 +32,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        jvmTarget = "11"
+    testOptions {
+        unitTests {
+            // Robolectric needs merged resources/manifest for Compose UI tests.
+            isIncludeAndroidResources = true
+        }
     }
 
     publishing {
@@ -56,6 +58,13 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.androidx.graphics.shapes)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    // Declares the ComponentActivity that createComposeRule() launches.
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 
 // Publish a "release" artifact so the repo can be consumed straight from
